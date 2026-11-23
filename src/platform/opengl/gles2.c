@@ -123,6 +123,7 @@ static void mGLES2ContextInit(struct VideoBackend* v, WHandle handle) {
 	}
 	context->width = 1;
 	context->height = 1;
+	context->frameCount = 0;
 
 	glGenBuffers(1, &context->vbo);
 	glBindBuffer(GL_ARRAY_BUFFER, context->vbo);
@@ -171,10 +172,10 @@ static void mGLES2ContextInit(struct VideoBackend* v, WHandle handle) {
 	uniforms[3].max.fvec3[0] = 1.0f;
 	uniforms[3].max.fvec3[1] = 1.0f;
 	uniforms[3].max.fvec3[2] = 1.0f;
-	mGLES2ShaderInit(&context->initialShader, _vertexShader, _fragmentShader, -1, -1, false, false, uniforms, 4);
-	mGLES2ShaderInit(&context->finalShader, NULL, NULL, 0, 0, false, false, NULL, 0);
-	mGLES2ShaderInit(&context->interframeShader, NULL, _interframeFragmentShader, -1, -1, false, false, NULL, 0);
-	mGLES2ShaderInit(&context->overlayShader, _vertexShader, _thruFragmentShader, -1, -1, false, false, NULL, 0);
+	mGLES2ShaderInit(&context->initialShader, _vertexShader, _fragmentShader, -1, -1, false, 0, false, uniforms, 4);
+	mGLES2ShaderInit(&context->finalShader, NULL, NULL, 0, 0, false, 0, false, NULL, 0);
+	mGLES2ShaderInit(&context->interframeShader, NULL, _interframeFragmentShader, -1, -1, false, 0, false, NULL, 0);
+	mGLES2ShaderInit(&context->overlayShader, _vertexShader, _thruFragmentShader, -1, -1, false, 0, false, NULL, 0);
 
 #ifdef BUILD_GLES3
 	if (context->initialShader.vao != (GLuint) -1) {
@@ -391,6 +392,7 @@ static void _drawShaderEx(struct mGLES2Context* context, struct mGLES2Shader* sh
 	glUniform1i(shader->texLocation, 0);
 	glUniform2f(shader->texSizeLocation, context->width, context->height);
 	glUniform2f(shader->outputSizeLocation, drawW, drawH);
+	glUniform1ui(shader->frameCountLocation, (shader->frameCountMod == 0) ? context->frameCount : context->frameCount % shader->frameCountMod);
 #ifdef BUILD_GLES3
 	if (shader->vao != (GLuint) -1) {
 		glBindVertexArray(shader->vao);
@@ -520,6 +522,7 @@ void mGLES2ContextDrawFrame(struct VideoBackend* v) {
 		glBindVertexArray(0);
 	}
 #endif
+	++context->frameCount;
 }
 
 static void mGLES2ContextSetImageSize(struct VideoBackend* v, enum VideoLayer layer, int width, int height) {
@@ -619,10 +622,11 @@ void mGLES2ContextUseFramebuffer(struct mGLES2Context* context) {
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-void mGLES2ShaderInit(struct mGLES2Shader* shader, const char* vs, const char* fs, int width, int height, bool integerScaling, bool floatFramebuffer, struct mGLES2Uniform* uniforms, size_t nUniforms) {
+void mGLES2ShaderInit(struct mGLES2Shader* shader, const char* vs, const char* fs, int width, int height, bool integerScaling, int frameCountMod, bool floatFramebuffer, struct mGLES2Uniform* uniforms, size_t nUniforms) {
 	shader->width = width;
 	shader->height = height;
 	shader->integerScaling = integerScaling;
+	shader->frameCountMod = frameCountMod;
 	shader->floatFramebuffer = floatFramebuffer;
 	shader->filter = false;
 	shader->blend = false;
@@ -703,6 +707,8 @@ void mGLES2ShaderInit(struct mGLES2Shader* shader, const char* vs, const char* f
 	shader->texSizeLocation = glGetUniformLocation(shader->program, "texSize");
 	shader->positionLocation = glGetAttribLocation(shader->program, "position");
 	shader->outputSizeLocation = glGetUniformLocation(shader->program, "outputSize");
+	shader->frameCountLocation = glGetUniformLocation(shader->program, "frameCount");
+
 	size_t i;
 	for (i = 0; i < shader->nUniforms; ++i) {
 		shader->uniforms[i].location = glGetUniformLocation(shader->program, shader->uniforms[i].name);
@@ -1170,10 +1176,12 @@ bool mGLES2ShaderLoad(struct VideoShader* shader, struct VDir* dir) {
 				int width = 0;
 				int height = 0;
 				int scaling = 0;
+				int frameCountMod = 0;
 				int floatFramebuffer = 0;
 				_lookupIntValue(&description, passName, "width", &width);
 				_lookupIntValue(&description, passName, "height", &height);
 				_lookupIntValue(&description, passName, "integerScaling", &scaling);
+				_lookupIntValue(&description, passName, "frameCountMod", &frameCountMod);
 				_lookupIntValue(&description, passName, "floatFramebuffer", &floatFramebuffer);
 
 				struct mGLES2UniformList uniformVector;
@@ -1195,7 +1203,7 @@ bool mGLES2ShaderLoad(struct VideoShader* shader, struct VDir* dir) {
 				}
 				mGLES2UniformListDeinit(&uniformVector);
 
-				mGLES2ShaderInit(&shaderBlock[n], vssrc, fssrc, width, height, scaling, floatFramebuffer, uniformBlock, u);
+				mGLES2ShaderInit(&shaderBlock[n], vssrc, fssrc, width, height, scaling, frameCountMod, floatFramebuffer, uniformBlock, u);
 				int b = 0;
 				_lookupIntValue(&description, passName, "blend", &b);
 				if (b) {
